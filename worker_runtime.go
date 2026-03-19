@@ -58,7 +58,7 @@ func (w *Worker) fetchBatch(ctx context.Context, consumer jetstream.Consumer) ([
 	fetchCtx, cancel := context.WithTimeout(ctx, w.cfg.fetchTimeout)
 	defer cancel()
 
-	batch, err := consumer.Fetch(w.cfg.fetchBatch, jetstream.FetchContext(fetchCtx))
+	batch, err := consumer.Fetch(w.fetchSize(), jetstream.FetchContext(fetchCtx))
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +69,14 @@ func (w *Worker) fetchBatch(ctx context.Context, consumer jetstream.Consumer) ([
 	}
 
 	return msgs, batch.Error()
+}
+
+func (w *Worker) fetchSize() int {
+	if w.cfg.concurrency > w.cfg.fetchBatch {
+		return w.cfg.concurrency
+	}
+
+	return w.cfg.fetchBatch
 }
 
 func (w *Worker) handleFetchResult(ctx context.Context, err error) (stop bool, runErr error) {

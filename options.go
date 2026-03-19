@@ -28,6 +28,7 @@ type workerConfig struct {
 	config
 	consumerPrefix    string
 	durable           string
+	concurrency       int
 	fetchBatch        int
 	fetchTimeout      time.Duration
 	taskTimeout       time.Duration
@@ -70,6 +71,7 @@ func defaultWorkerConfig() workerConfig {
 	return workerConfig{
 		config:           base,
 		consumerPrefix:   defaultConsumerPrefix,
+		concurrency:      1,
 		fetchBatch:       defaultFetchBatchSize,
 		fetchTimeout:     defaultFetchTimeout,
 		idleWait:         defaultIdleWait,
@@ -88,6 +90,10 @@ func (c workerConfig) validate() error {
 
 	if c.fetchBatch <= 0 {
 		return fmt.Errorf("natasks: fetch batch must be positive")
+	}
+
+	if c.concurrency <= 0 {
+		return fmt.Errorf("natasks: concurrency must be positive")
 	}
 
 	if c.fetchTimeout <= 0 {
@@ -207,6 +213,13 @@ func WithDurable(name string) WorkerOption {
 func WithFetchBatch(size int) WorkerOption {
 	return workerOptionFunc(func(cfg *workerConfig) {
 		cfg.fetchBatch = size
+	})
+}
+
+// WithConcurrency overrides the number of tasks processed in parallel by the worker.
+func WithConcurrency(n int) WorkerOption {
+	return workerOptionFunc(func(cfg *workerConfig) {
+		cfg.concurrency = n
 	})
 }
 

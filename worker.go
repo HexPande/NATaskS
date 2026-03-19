@@ -71,7 +71,9 @@ func (w *Worker) Handle(name string, handler Handler) {
 		return
 	}
 
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+
+	if name == "" {
 		panic("natasks: handler name is required")
 	}
 
@@ -153,11 +155,42 @@ func (w *Worker) handleMessage(ctx context.Context, msg jetstream.Msg) error {
 }
 
 func (w *Worker) processBatch(ctx context.Context, msgs []jetstream.Msg) {
-	for _, msg := range msgs {
-		if err := w.handleMessage(ctx, msg); err != nil {
-			w.logger.Error("natasks: handle task", "error", err)
-		}
+	if len(msgs) == 0 {
+		return
 	}
+
+	limit := w.cfg.concurrency
+	if limit <= 1 || len(msgs) == 1 {
+		for _, msg := range msgs {
+			if err := w.handleMessage(ctx, msg); err != nil {
+				w.logger.Error("natasks: handle task", "error", err)
+			}
+		}
+		return
+	}
+
+	if limit > len(msgs) {
+		limit = len(msgs)
+	}
+
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+
+	for _, msg := range msgs {
+		sem <- struct{}{}
+		wg.Add(1)
+
+		go func(msg jetstream.Msg) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := w.handleMessage(ctx, msg); err != nil {
+				w.logger.Error("natasks: handle task", "error", err)
+			}
+		}(msg)
+	}
+
+	wg.Wait()
 }
 
 func (w *Worker) extractMessageContext(ctx context.Context, msg jetstream.Msg) context.Context {

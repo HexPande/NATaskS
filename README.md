@@ -71,6 +71,7 @@ func main() {
 	worker, err := natasks.NewWorker(
 		js,
 		"emails",
+		natasks.WithConcurrency(8),
 		natasks.WithMaxRetries(3),
 		natasks.WithRetryBackoff(500*time.Millisecond, time.Second, 2*time.Second),
 	)
@@ -137,12 +138,14 @@ If a handler returns an error, the worker can retry the task and eventually move
 
 Worker options:
 
+- `WithConcurrency(n)`
 - `WithMaxRetries(n)`
 - `WithRetryBackoff(delays...)`
 - `WithDLQSuffix(suffix)`
 
 Defaults:
 
+- `concurrency`: `1`
 - `max retries`: `-1` (unlimited)
 - `retry backoff`: none
 - `dlq suffix`: `-dlq`
@@ -178,6 +181,7 @@ Worker options:
 
 - `WithConsumerPrefix(prefix)`
 - `WithDurable(name)`
+- `WithConcurrency(n)`
 - `WithFetchBatch(size)`
 - `WithFetchTimeout(timeout)`
 - `WithIdleWait(wait)`

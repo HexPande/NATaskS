@@ -3,6 +3,7 @@ package natasks
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -212,4 +213,85 @@ func TestWorkerAckDeadLetteredMessage(t *testing.T) {
 	handlerErr := errors.New("handler failed")
 	require.Equal(t, handlerErr, w.ackDeadLetteredMessage(msg, handlerErr))
 	require.True(t, msg.acked)
+}
+
+func TestWorkerFetchSize(t *testing.T) {
+	w := &Worker{cfg: workerConfig{fetchBatch: 1, concurrency: 4}}
+	require.Equal(t, 4, w.fetchSize())
+
+	w.cfg.fetchBatch = 10
+	require.Equal(t, 10, w.fetchSize())
+}
+
+func TestWorkerProcessBatchConcurrency(t *testing.T) {
+	const total = 4
+
+	started := make(chan struct{}, total)
+	release := make(chan struct{})
+	var active int32
+	var maxActive int32
+
+	w := &Worker{
+		cfg: workerConfig{
+			concurrency:      2,
+			progressInterval: time.Hour,
+		},
+		handlers: map[string]Handler{
+			"jobs.test": func(ctx context.Context, task *Task) error {
+				current := atomic.AddInt32(&active, 1)
+				defer atomic.AddInt32(&active, -1)
+
+				for {
+					observed := atomic.LoadInt32(&maxActive)
+					if current <= observed || atomic.CompareAndSwapInt32(&maxActive, observed, current) {
+						break
+					}
+				}
+
+				started <- struct{}{}
+				<-release
+				return nil
+			},
+		},
+	}
+
+	msgs := make([]jetstream.Msg, 0, total)
+	for range total {
+		msgs = append(msgs, &testMsg{
+			headers: nats.Header{
+				headerTaskName: []string{"jobs.test"},
+			},
+			data: []byte(`{}`),
+		})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		w.processBatch(context.Background(), msgs)
+		close(done)
+	}()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for concurrent handlers to start")
+		}
+	}
+
+	select {
+	case <-started:
+		t.Fatal("worker exceeded configured concurrency")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for batch processing")
+	}
+
+	require.EqualValues(t, 2, atomic.LoadInt32(&maxActive))
 }
