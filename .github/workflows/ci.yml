@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      nats:
+        image: nats:2-alpine
+        ports:
+          - 4222:4222
+          - 8222:8222
+        options: >-
+          --health-cmd "wget --spider -q http://127.0.0.1:8222/healthz || exit 1"
+          --health-interval 1s
+          --health-timeout 2s
+          --health-retries 20
+        command:
+          - -js
+          - -sd
+          - /data
+          - -m
+          - "8222"
+
+    env:
+      NATASKS_NATS_URL: nats://127.0.0.1:4222
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test -v ./...
