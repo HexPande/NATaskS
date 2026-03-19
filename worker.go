@@ -212,12 +212,10 @@ func (w *Worker) messageTask(msg jetstream.Msg) (*Task, Handler, error) {
 		return nil, nil, w.terminateMessage(msg, "unhandled", fmt.Errorf("%w: %s", ErrHandlerNotFound, taskName))
 	}
 
-	task, err := NewTask(taskName, msg.Data())
+	task, err := taskFromMessage(msg)
 	if err != nil {
 		return nil, nil, w.terminateMessage(msg, "invalid task", err)
 	}
-	task.WithMessageID(msg.Headers().Get(jetstream.MsgIDHeader))
-	task.headers = cloneHeaders(msg.Headers())
 
 	return task, handler, nil
 }

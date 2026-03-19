@@ -96,21 +96,7 @@ func (c *Client) dispatchTask(ctx context.Context, task *Task, queue string) err
 func (c *Client) newMessage(ctx context.Context, queue string, task *Task) *nats.Msg {
 	queue = normalizeQueue(queue)
 	targetSubject := queueSubject(c.cfg.subjectPrefix, queue)
-	taskName := task.Name()
-	messageID := task.MessageID()
-
-	msg := nats.NewMsg(targetSubject)
-	for key, values := range task.Headers() {
-		for _, value := range values {
-			msg.Header.Add(key, value)
-		}
-	}
-	msg.Header.Set(headerTaskName, taskName)
-	msg.Header.Set(headerQueueName, queue)
-	if messageID != "" {
-		msg.Header.Set(jetstream.MsgIDHeader, messageID)
-	}
-	msg.Data = task.Payload()
+	msg := buildTaskMessage(targetSubject, queue, task)
 
 	if scheduledAt, ok := dispatchScheduleAt(ctx); ok {
 		c.applyScheduleHeaders(msg, scheduledAt, targetSubject)

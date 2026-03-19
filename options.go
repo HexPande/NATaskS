@@ -50,12 +50,12 @@ func defaultConfig() config {
 }
 
 func (c config) validate() error {
-	if strings.TrimSpace(c.streamName) == "" {
-		return fmt.Errorf("natasks: stream name is required")
+	if err := requireText(c.streamName, "stream name"); err != nil {
+		return err
 	}
 
-	if strings.TrimSpace(c.subjectPrefix) == "" {
-		return fmt.Errorf("natasks: subject prefix is required")
+	if err := requireText(c.subjectPrefix, "subject prefix"); err != nil {
+		return err
 	}
 
 	if strings.Contains(c.subjectPrefix, "*") || strings.Contains(c.subjectPrefix, ">") {
@@ -88,48 +88,80 @@ func (c workerConfig) validate() error {
 		return err
 	}
 
-	if c.fetchBatch <= 0 {
-		return fmt.Errorf("natasks: fetch batch must be positive")
+	if err := requirePositiveInt(c.fetchBatch, "fetch batch"); err != nil {
+		return err
 	}
 
-	if c.concurrency <= 0 {
-		return fmt.Errorf("natasks: concurrency must be positive")
+	if err := requirePositiveInt(c.concurrency, "concurrency"); err != nil {
+		return err
 	}
 
-	if c.fetchTimeout <= 0 {
-		return fmt.Errorf("natasks: fetch timeout must be positive")
+	if err := requirePositiveDuration(c.fetchTimeout, "fetch timeout"); err != nil {
+		return err
 	}
 
-	if c.taskTimeout < 0 {
-		return fmt.Errorf("natasks: task timeout must not be negative")
+	if err := requireNonNegativeDuration(c.taskTimeout, "task timeout"); err != nil {
+		return err
 	}
 
-	if c.idleWait < 0 {
-		return fmt.Errorf("natasks: idle wait must not be negative")
+	if err := requireNonNegativeDuration(c.idleWait, "idle wait"); err != nil {
+		return err
 	}
 
-	if c.ackWait <= 0 {
-		return fmt.Errorf("natasks: ack wait must be positive")
+	if err := requirePositiveDuration(c.ackWait, "ack wait"); err != nil {
+		return err
 	}
 
-	if c.progressInterval <= 0 {
-		return fmt.Errorf("natasks: progress interval must be positive")
+	if err := requirePositiveDuration(c.progressInterval, "progress interval"); err != nil {
+		return err
 	}
 
 	if c.progressInterval >= c.ackWait {
 		return fmt.Errorf("natasks: progress interval must be less than ack wait")
 	}
 
-	if c.maxAckPending <= 0 {
-		return fmt.Errorf("natasks: max ack pending must be positive")
+	if err := requirePositiveInt(c.maxAckPending, "max ack pending"); err != nil {
+		return err
 	}
 
 	if c.maxRetries < -1 {
 		return fmt.Errorf("natasks: max retries must be greater than or equal to -1")
 	}
 
-	if strings.TrimSpace(c.dlqSuffix) == "" {
-		return fmt.Errorf("natasks: dlq suffix is required")
+	if err := requireText(c.dlqSuffix, "dlq suffix"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func requireText(value, name string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("natasks: %s is required", name)
+	}
+
+	return nil
+}
+
+func requirePositiveInt(value int, name string) error {
+	if value <= 0 {
+		return fmt.Errorf("natasks: %s must be positive", name)
+	}
+
+	return nil
+}
+
+func requirePositiveDuration(value time.Duration, name string) error {
+	if value <= 0 {
+		return fmt.Errorf("natasks: %s must be positive", name)
+	}
+
+	return nil
+}
+
+func requireNonNegativeDuration(value time.Duration, name string) error {
+	if value < 0 {
+		return fmt.Errorf("natasks: %s must not be negative", name)
 	}
 
 	return nil

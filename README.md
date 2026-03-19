@@ -204,6 +204,36 @@ Observability packages:
 - `github.com/hexpande/natasks/middleware/otel`
 - `github.com/hexpande/natasks/middleware/prometheus`
 
+OpenTelemetry requires two pieces:
+
+- `otel.Middleware` for dispatch and process spans
+- `natasks.WithPropagator(otelMiddleware)` for trace-context propagation through message headers
+
+Example:
+
+```go
+otelMiddleware := otel.New(otel.Options{})
+
+client, err := natasks.NewClient(
+	js,
+	natasks.WithPropagator(otelMiddleware),
+	natasks.WithDispatchMiddleware(otelMiddleware.DispatchMiddleware()),
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+worker, err := natasks.NewWorker(
+	js,
+	"emails",
+	natasks.WithPropagator(otelMiddleware),
+	natasks.WithProcessMiddleware(otelMiddleware.ProcessMiddleware("emails")),
+)
+if err != nil {
+	log.Fatal(err)
+}
+```
+
 ## Configuration
 
 Shared options:

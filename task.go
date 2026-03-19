@@ -32,15 +32,24 @@ type Task struct {
 
 // NewTask constructs a task with a raw payload.
 func NewTask(name string, payload []byte) (*Task, error) {
+	return newTask(name, payload, nil, "", true)
+}
+
+func newTask(name string, payload []byte, headers nats.Header, messageID string, clone bool) (*Task, error) {
 	if name == "" {
 		return nil, ErrEmptyTaskName
 	}
 
-	cloned := append([]byte(nil), payload...)
+	if clone {
+		payload = append([]byte(nil), payload...)
+		headers = cloneHeaders(headers)
+	}
 
 	return &Task{
-		name:    name,
-		payload: cloned,
+		name:      name,
+		payload:   payload,
+		messageID: messageID,
+		headers:   headers,
 	}, nil
 }
 
