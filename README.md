@@ -12,17 +12,17 @@ It focuses on two things:
 
 ## Features
 
-- JetStream-based task dispatching
-- delayed task dispatch
+- task dispatch on top of NATS JetStream
+- immediate, delayed, and scheduled task delivery
 - publish deduplication via `Nats-Msg-Id`
-- worker-based task processing
+- worker-based task processing with configurable concurrency
 - automatic stream and consumer provisioning
-- retry policy with backoff and DLQ
-- graceful shutdown
+- retries with backoff and dead-letter queues
+- graceful worker shutdown
 - lease renewal for long-running handlers via `InProgress`
 - dispatch and processing middleware
-- OpenTelemetry propagation support
-- Prometheus middleware
+- OpenTelemetry context propagation
+- Prometheus metrics middleware
 
 ## Installation
 
@@ -50,6 +50,11 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+type SendEmailPayload struct {
+	UserID int    `json:"user_id"`
+	Email  string `json:"email"`
+}
 
 func main() {
 	nc, err := nats.Connect("nats://127.0.0.1:4222")
@@ -80,23 +85,21 @@ func main() {
 	}
 
 	worker.Handle("emails.send", func(ctx context.Context, task *natasks.Task) error {
-		var payload struct {
-			UserID int    `json:"user_id"`
-			Email  string `json:"email"`
-		}
-
+		var payload SendEmailPayload
 		if err := task.Unmarshal(&payload); err != nil {
-			return err
+			return natasks.NoRetry(err)
 		}
 
 		log.Printf("send email to %s for user %d", payload.Email, payload.UserID)
 		return nil
 	})
 
-	body, err := json.Marshal(map[string]any{
-		"user_id": 42,
-		"email":   "user@example.com",
-	})
+	payload := SendEmailPayload{
+		UserID: 42,
+		Email:  "user@example.com",
+	}
+
+	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Fatal(err)
 	}
