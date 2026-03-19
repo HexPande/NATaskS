@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/nats-io/nats.go"
 )
 
 const (
@@ -25,6 +27,7 @@ type Task struct {
 	name      string
 	payload   []byte
 	messageID string
+	headers   nats.Header
 }
 
 // NewTask constructs a task with a raw payload.
@@ -59,6 +62,50 @@ func (t *Task) Payload() []byte {
 	return append([]byte(nil), t.payload...)
 }
 
+// Header returns the first value for the given task header key.
+func (t *Task) Header(key string) string {
+	if t == nil || t.headers == nil {
+		return ""
+	}
+
+	return t.headers.Get(key)
+}
+
+// Headers returns a copy of task headers.
+func (t *Task) Headers() nats.Header {
+	if t == nil {
+		return nil
+	}
+
+	return cloneHeaders(t.headers)
+}
+
+// SetHeader sets a task header value.
+func (t *Task) SetHeader(key, value string) *Task {
+	if t == nil {
+		return nil
+	}
+
+	if t.headers == nil {
+		t.headers = nats.Header{}
+	}
+	t.headers.Set(key, value)
+	return t
+}
+
+// AddHeader appends a task header value.
+func (t *Task) AddHeader(key, value string) *Task {
+	if t == nil {
+		return nil
+	}
+
+	if t.headers == nil {
+		t.headers = nats.Header{}
+	}
+	t.headers.Add(key, value)
+	return t
+}
+
 // WithMessageID sets the JetStream message ID used for publish deduplication.
 func (t *Task) WithMessageID(id string) *Task {
 	if t == nil {
@@ -89,4 +136,17 @@ func (t *Task) Unmarshal(dst any) error {
 	}
 
 	return nil
+}
+
+func cloneHeaders(headers nats.Header) nats.Header {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	cloned := make(nats.Header, len(headers))
+	for key, values := range headers {
+		cloned[key] = append([]string(nil), values...)
+	}
+
+	return cloned
 }

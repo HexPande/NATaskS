@@ -100,6 +100,11 @@ func (c *Client) newMessage(ctx context.Context, queue string, task *Task) *nats
 	messageID := task.MessageID()
 
 	msg := nats.NewMsg(targetSubject)
+	for key, values := range task.Headers() {
+		for _, value := range values {
+			msg.Header.Add(key, value)
+		}
+	}
 	msg.Header.Set(headerTaskName, taskName)
 	msg.Header.Set(headerQueueName, queue)
 	if messageID != "" {

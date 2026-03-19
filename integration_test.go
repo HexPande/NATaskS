@@ -460,10 +460,12 @@ func TestIntegrationNoRetryAcknowledgesWithoutRedelivery(t *testing.T) {
 	defer cancelFetch()
 	msgs, err := sub.Fetch(1, jetstream.FetchContext(dlqFetchCtx))
 	require.NoError(t, err)
+	var gotDLQ bool
 	for range msgs.Messages() {
-		require.FailNow(t, "unexpected message in DLQ")
+		gotDLQ = true
 	}
-	require.Error(t, msgs.Error())
+	require.NoError(t, msgs.Error())
+	require.False(t, gotDLQ, "unexpected message in DLQ")
 }
 
 func TestIntegrationDispatchPublishesHeadersAndPayload(t *testing.T) {
@@ -819,6 +821,75 @@ func TestIntegrationProcessMiddlewareWrapsHandler(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		require.FailNow(t, "timeout waiting for middleware-wrapped handler")
+	}
+}
+
+func TestIntegrationMiddlewareCanWriteAndReadTaskHeaders(t *testing.T) {
+	t.Parallel()
+
+	env := newIntegrationEnv(t)
+	client, err := NewClient(
+		env.js,
+		WithStreamName(env.streamName),
+		WithSubjectPrefix(env.subjectPrefix),
+		WithDispatchMiddleware(func(next DispatchFunc) DispatchFunc {
+			return func(ctx context.Context, task *Task, queue string) error {
+				task.SetHeader("X-Request-ID", "req-42")
+				return next(ctx, task, queue)
+			}
+		}),
+	)
+	require.NoError(t, err)
+
+	worker, err := NewWorker(
+		env.js,
+		"emails",
+		WithStreamName(env.streamName),
+		WithSubjectPrefix(env.subjectPrefix),
+		WithConsumerPrefix(testToken(t, "consumer")),
+		WithFetchTimeout(500*time.Millisecond),
+		WithIdleWait(10*time.Millisecond),
+		WithProcessMiddleware(func(next Handler) Handler {
+			return func(ctx context.Context, task *Task) error {
+				if task.Header("X-Request-ID") != "req-42" {
+					return errors.New("missing task header")
+				}
+
+				return next(ctx, task)
+			}
+		}),
+	)
+	require.NoError(t, err)
+	worker.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	done := make(chan struct{}, 1)
+	worker.Handle("emails.send", func(ctx context.Context, task *Task) error {
+		if task.Header("X-Request-ID") != "req-42" {
+			return errors.New("handler did not receive task header")
+		}
+
+		done <- struct{}{}
+		return nil
+	})
+
+	workerErr, stopWorker := runWorker(t, worker)
+	defer stopWorker()
+
+	body, err := json.Marshal(map[string]string{"kind": "headers"})
+	require.NoError(t, err)
+	task, err := NewTask("emails.send", body)
+	require.NoError(t, err)
+
+	dispatchCtx, cancelDispatch := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelDispatch()
+	require.NoError(t, client.Dispatch(dispatchCtx, task, "emails"))
+
+	select {
+	case <-done:
+	case err := <-workerErr:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "timeout waiting for header-aware middleware")
 	}
 }
 

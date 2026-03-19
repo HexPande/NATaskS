@@ -178,6 +178,27 @@ Core middleware types:
 - `DispatchMiddleware`
 - `ProcessMiddleware`
 
+Task headers are available directly in middleware through `Task`:
+
+```go
+natasks.WithDispatchMiddleware(func(next natasks.DispatchFunc) natasks.DispatchFunc {
+	return func(ctx context.Context, task *natasks.Task, queue string) error {
+		task.SetHeader("X-Request-ID", "req-42")
+		return next(ctx, task, queue)
+	}
+})
+
+natasks.WithProcessMiddleware(func(next natasks.Handler) natasks.Handler {
+	return func(ctx context.Context, task *natasks.Task) error {
+		requestID := task.Header("X-Request-ID")
+		_ = requestID
+		return next(ctx, task)
+	}
+})
+```
+
+Use `WithPropagator(...)` when you want to map values between `context.Context` and headers automatically.
+
 Observability packages:
 
 - `github.com/hexpande/natasks/middleware/otel`

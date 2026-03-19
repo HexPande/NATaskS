@@ -8,7 +8,7 @@ lint:
 
 test: install_deps
 	$(info ******************** running tests ********************)
-	go test -v ./...
+	NATASKS_NATS_URL=nats://127.0.0.1:4222 go test -v ./...
 
 docker-test:
 	$(info ******************** running tests in docker ********************)
