@@ -119,6 +119,19 @@ func main() {
 }
 ```
 
+## Examples
+
+Runnable examples live in [`examples/`](./examples):
+
+- [`examples/basic`](./examples/basic)
+- [`examples/delayed`](./examples/delayed)
+- [`examples/retries-dlq`](./examples/retries-dlq)
+- [`examples/middleware-headers`](./examples/middleware-headers)
+- [`examples/otel`](./examples/otel)
+- [`examples/prometheus`](./examples/prometheus)
+
+See [`examples/README.md`](./examples/README.md) for a short index and usage notes.
+
 ## API
 
 Main constructors:
