@@ -26,12 +26,7 @@ jobs:
           --health-interval 1s
           --health-timeout 2s
           --health-retries 20
-        command:
-          - -js
-          - -sd
-          - /data
-          - -m
-          - "8222"
+        command: -js -sd /data -m 8222
 
     env:
       NATASKS_NATS_URL: nats://127.0.0.1:4222
