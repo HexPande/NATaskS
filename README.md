@@ -136,6 +136,18 @@ Main methods:
 
 If a handler returns an error, the worker can retry the task and eventually move it to a dead-letter queue.
 
+If a handler should fail without retries and without DLQ publication, return `natasks.NoRetry(err)`.
+
+```go
+worker.Handle("emails.send", func(ctx context.Context, task *natasks.Task) error {
+	if err := validate(task); err != nil {
+		return natasks.NoRetry(err)
+	}
+
+	return sendEmail(ctx, task)
+})
+```
+
 Worker options:
 
 - `WithConcurrency(n)`

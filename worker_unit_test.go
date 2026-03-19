@@ -215,6 +215,40 @@ func TestWorkerAckDeadLetteredMessage(t *testing.T) {
 	require.True(t, msg.acked)
 }
 
+func TestNoRetryWrapsError(t *testing.T) {
+	err := NoRetry(errors.New("do not retry"))
+	require.ErrorIs(t, err, ErrNoRetry)
+	require.EqualError(t, err, "do not retry")
+	require.EqualError(t, unwrapNoRetry(err), "do not retry")
+	require.NoError(t, NoRetry(nil))
+}
+
+func TestWorkerHandleMessageNoRetry(t *testing.T) {
+	w := &Worker{
+		cfg: workerConfig{
+			progressInterval: time.Hour,
+		},
+		handlers: map[string]Handler{
+			"jobs.test": func(ctx context.Context, task *Task) error {
+				return NoRetry(errors.New("stop here"))
+			},
+		},
+	}
+
+	msg := &testMsg{
+		headers: nats.Header{
+			headerTaskName: []string{"jobs.test"},
+		},
+		data: []byte(`{}`),
+	}
+
+	err := w.handleMessage(context.Background(), msg)
+	require.EqualError(t, err, "stop here")
+	require.True(t, msg.acked)
+	require.False(t, msg.nacked)
+	require.False(t, msg.termed)
+}
+
 func TestWorkerFetchSize(t *testing.T) {
 	w := &Worker{cfg: workerConfig{fetchBatch: 1, concurrency: 4}}
 	require.Equal(t, 4, w.fetchSize())

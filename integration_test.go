@@ -406,6 +406,66 @@ func TestIntegrationRetryExhaustedPublishesToDLQ(t *testing.T) {
 	require.Equal(t, int32(3), attempts.Load())
 }
 
+func TestIntegrationNoRetryAcknowledgesWithoutRedelivery(t *testing.T) {
+	t.Parallel()
+
+	env := newIntegrationEnv(t)
+	queue := "noretry"
+	client := env.newClient(t)
+	worker := env.newWorker(t, queue)
+
+	var attempts atomic.Int32
+	done := make(chan struct{}, 1)
+	worker.Handle("jobs.noretry", func(ctx context.Context, task *Task) error {
+		attempts.Add(1)
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+		return NoRetry(errors.New("invalid payload"))
+	})
+
+	workerErr, stopWorker := runWorker(t, worker)
+	defer stopWorker()
+
+	dlqName := dlqQueue(queue, defaultDLQSuffix)
+	sub := env.inspectConsumer(t, queueSubject(env.subjectPrefix, dlqName))
+
+	body, err := json.Marshal(map[string]string{"kind": "invalid"})
+	require.NoError(t, err)
+	task, err := NewTask("jobs.noretry", body)
+	require.NoError(t, err)
+
+	dispatchCtx, cancelDispatch := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelDispatch()
+	require.NoError(t, client.Dispatch(dispatchCtx, task, queue))
+
+	select {
+	case <-done:
+	case err := <-workerErr:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "timeout waiting for non-retriable task")
+	}
+
+	select {
+	case err := <-workerErr:
+		require.NoError(t, err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	require.Equal(t, int32(1), attempts.Load())
+
+	dlqFetchCtx, cancelFetch := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelFetch()
+	msgs, err := sub.Fetch(1, jetstream.FetchContext(dlqFetchCtx))
+	require.NoError(t, err)
+	for range msgs.Messages() {
+		require.FailNow(t, "unexpected message in DLQ")
+	}
+	require.Error(t, msgs.Error())
+}
+
 func TestIntegrationDispatchPublishesHeadersAndPayload(t *testing.T) {
 	t.Parallel()
 

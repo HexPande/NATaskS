@@ -2,6 +2,7 @@ package natasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,10 @@ import (
 )
 
 func (w *Worker) retryOrDeadLetter(msg jetstream.Msg, task *Task, handlerErr error) error {
+	if errors.Is(handlerErr, ErrNoRetry) {
+		return w.ackNoRetryMessage(msg, handlerErr)
+	}
+
 	deliveries, err := deliveryAttempts(msg)
 	if err != nil {
 		return err
@@ -37,6 +42,14 @@ func (w *Worker) retryOrDeadLetter(msg jetstream.Msg, task *Task, handlerErr err
 	}
 
 	return handlerErr
+}
+
+func (w *Worker) ackNoRetryMessage(msg jetstream.Msg, handlerErr error) error {
+	if err := msg.Ack(); err != nil {
+		return fmt.Errorf("natasks: ack no-retry message: %w", err)
+	}
+
+	return unwrapNoRetry(handlerErr)
 }
 
 func (w *Worker) exhaustedRetries(deliveries uint64) bool {
