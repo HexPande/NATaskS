@@ -96,12 +96,14 @@ func (c *Client) dispatchTask(ctx context.Context, task *Task, queue string) err
 func (c *Client) newMessage(ctx context.Context, queue string, task *Task) *nats.Msg {
 	queue = normalizeQueue(queue)
 	targetSubject := queueSubject(c.cfg.subjectPrefix, queue)
+	taskName := task.Name()
+	messageID := task.MessageID()
 
 	msg := nats.NewMsg(targetSubject)
-	msg.Header.Set(headerTaskName, task.Name())
+	msg.Header.Set(headerTaskName, taskName)
 	msg.Header.Set(headerQueueName, queue)
-	if task.MessageID() != "" {
-		msg.Header.Set(jetstream.MsgIDHeader, task.MessageID())
+	if messageID != "" {
+		msg.Header.Set(jetstream.MsgIDHeader, messageID)
 	}
 	msg.Data = task.Payload()
 

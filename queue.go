@@ -18,15 +18,15 @@ func normalizeQueue(queue string) string {
 }
 
 func queueSubject(prefix, queue string) string {
-	return fmt.Sprintf("%s.%s", prefix, normalizeQueue(queue))
+	return prefix + "." + normalizeQueue(queue)
 }
 
 func scheduleSubject(prefix string) string {
-	return fmt.Sprintf("%s.%s", prefix, internalScheduleToken)
+	return prefix + "." + internalScheduleToken
 }
 
 func streamSubject(prefix string) string {
-	return fmt.Sprintf("%s.*", prefix)
+	return prefix + ".*"
 }
 
 func streamSubjects(prefix string) []string {
