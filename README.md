@@ -214,3 +214,48 @@ make docker-test
 ```
 
 Integration tests use a real NATS JetStream instance via Docker Compose.
+
+## Benchmarking
+
+Run in-process microbenchmarks:
+
+```bash
+go test -run '^$' -bench . -benchmem ./...
+```
+
+For more stable numbers, prefer a longer bench time and multiple runs:
+
+```bash
+go test -run '^$' -bench . -benchmem -benchtime=2s -count=5 ./...
+```
+
+Live NATS integration/perf benchmarks are available for real JetStream dispatch and end-to-end worker processing. They require a reachable NATS server and `NATASKS_NATS_URL`:
+
+```bash
+NATASKS_NATS_URL=nats://127.0.0.1:4222 go test -run '^$' -bench 'Integration' -benchmem ./...
+```
+
+For more reliable integration numbers, vary CPU and run multiple samples:
+
+```bash
+NATASKS_NATS_URL=nats://127.0.0.1:4222 go test -run '^$' -bench 'Integration' -benchmem -benchtime=2s -count=5 -cpu=1,8 ./...
+```
+
+Example live integration results on Apple M2 with local NATS:
+
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `IntegrationDispatch-8` | `48849` | `2217` | `30` |
+| `IntegrationDispatchParallel-8` | `12352` | `2249` | `30` |
+| `IntegrationEndToEnd/serial-8` | `136070` | `7107` | `94` |
+| `IntegrationEndToEnd/parallel_8-8` | `101821` | `4982` | `60` |
+
+These numbers are environment-specific, but they show the expected shape: parallel dispatch improves throughput, and a worker with `WithConcurrency(8)` outperforms serial end-to-end processing.
+
+To compare changes between revisions, save results and use `benchstat`:
+
+```bash
+go test -run '^$' -bench . -benchmem -benchtime=3s -count=10 ./... > before.txt
+go test -run '^$' -bench . -benchmem -benchtime=3s -count=10 ./... > after.txt
+benchstat before.txt after.txt
+```
