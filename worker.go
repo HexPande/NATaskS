@@ -1,0 +1,215 @@
+package natasks
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
+	"strings"
+	"sync"
+
+	"github.com/nats-io/nats.go/jetstream"
+)
+
+var ErrHandlerNotFound = errors.New("natasks: handler not found")
+
+// Handler processes an incoming task.
+type Handler func(context.Context, *Task) error
+
+// Worker consumes tasks from a queue and dispatches them to registered handlers.
+type Worker struct {
+	js       jetstream.JetStream
+	consumer jetstream.Consumer
+	cfg      workerConfig
+	queue    string
+	logger   *slog.Logger
+	mu       sync.RWMutex
+	handlers map[string]Handler
+}
+
+// NewWorker constructs a worker for a single queue and ensures the required
+// stream and consumer exist.
+func NewWorker(js jetstream.JetStream, queue string, opts ...WorkerOption) (*Worker, error) {
+	cfg, err := collectWorkerConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if js == nil {
+		return nil, fmt.Errorf("natasks: nil jetstream context")
+	}
+
+	if err := validateQueueName(queue); err != nil {
+		return nil, err
+	}
+
+	if err := ensureStream(js, cfg.config); err != nil {
+		return nil, err
+	}
+
+	w := &Worker{
+		js:       js,
+		cfg:      cfg,
+		queue:    normalizeQueue(queue),
+		logger:   slog.Default(),
+		handlers: make(map[string]Handler),
+	}
+
+	consumer, err := w.ensureConsumer()
+	if err != nil {
+		return nil, err
+	}
+	w.consumer = consumer
+
+	return w, nil
+}
+
+// Handle registers a handler for a task name.
+func (w *Worker) Handle(name string, handler Handler) {
+	if w == nil {
+		return
+	}
+
+	if strings.TrimSpace(name) == "" {
+		panic("natasks: handler name is required")
+	}
+
+	if handler == nil {
+		panic("natasks: handler is nil")
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.handlers[name] = chainProcessMiddleware(handler, w.cfg.processMiddleware)
+}
+
+// WithLogger replaces the worker logger.
+func (w *Worker) WithLogger(logger *slog.Logger) *Worker {
+	if w == nil || logger == nil {
+		return w
+	}
+
+	w.logger = logger
+	return w
+}
+
+// Run starts the fetch loop and blocks until ctx is canceled or an unrecoverable
+// consumer setup error occurs.
+func (w *Worker) Run(ctx context.Context) error {
+	if w == nil {
+		return fmt.Errorf("natasks: nil worker")
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Graceful shutdown should stop fetching new messages, but allow the
+	// already-started handler to finish. Values from the run context are kept.
+	handleCtx := context.WithoutCancel(ctx)
+
+	consumer, err := w.consumerForRun()
+	if err != nil {
+		return fmt.Errorf("natasks: get worker consumer: %w", err)
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		msgs, err := w.fetchBatch(ctx, consumer)
+		if err != nil || len(msgs) == 0 {
+			if stop, runErr := w.handleFetchResult(ctx, err); stop {
+				return runErr
+			}
+
+			continue
+		}
+
+		w.processBatch(handleCtx, msgs)
+	}
+}
+
+func (w *Worker) handleMessage(ctx context.Context, msg jetstream.Msg) error {
+	ctx = w.extractMessageContext(ctx, msg)
+	ctx, cancel := w.processingContext(ctx)
+	defer cancel()
+
+	task, handler, err := w.messageTask(msg)
+	if err != nil {
+		return err
+	}
+
+	stopProgress := w.startProgressLoop(msg)
+	defer stopProgress()
+
+	if err := w.runHandler(ctx, handler, task); err != nil {
+		return w.retryOrDeadLetter(msg, task, err)
+	}
+
+	return w.ackMessage(msg)
+}
+
+func (w *Worker) processBatch(ctx context.Context, msgs []jetstream.Msg) {
+	for _, msg := range msgs {
+		if err := w.handleMessage(ctx, msg); err != nil {
+			w.logger.Error("natasks: handle task", "error", err)
+		}
+	}
+}
+
+func (w *Worker) extractMessageContext(ctx context.Context, msg jetstream.Msg) context.Context {
+	if w.cfg.propagator == nil {
+		return ctx
+	}
+
+	return w.cfg.propagator.Extract(ctx, natsHeaderCarrier(msg.Headers()))
+}
+
+func (w *Worker) messageTask(msg jetstream.Msg) (*Task, Handler, error) {
+	taskName := msg.Headers().Get(headerTaskName)
+	if taskName == "" {
+		return nil, nil, w.terminateMessage(msg, "malformed", fmt.Errorf("natasks: message missing task name header"))
+	}
+
+	handler, ok := w.handler(taskName)
+	if !ok {
+		return nil, nil, w.terminateMessage(msg, "unhandled", fmt.Errorf("%w: %s", ErrHandlerNotFound, taskName))
+	}
+
+	task, err := NewTask(taskName, msg.Data())
+	if err != nil {
+		return nil, nil, w.terminateMessage(msg, "invalid task", err)
+	}
+	task.WithMessageID(msg.Headers().Get(jetstream.MsgIDHeader))
+
+	return task, handler, nil
+}
+
+func (w *Worker) ackMessage(msg jetstream.Msg) error {
+	if err := msg.Ack(); err != nil {
+		return fmt.Errorf("natasks: ack message: %w", err)
+	}
+
+	return nil
+}
+
+func (w *Worker) processingContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if w.cfg.taskTimeout <= 0 {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, w.cfg.taskTimeout)
+}
+
+func (w *Worker) runHandler(ctx context.Context, handler Handler, task *Task) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("natasks: panic recovered: %v\n%s", recovered, debug.Stack())
+		}
+	}()
+
+	return handler(ctx, task)
+}
