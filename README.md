@@ -1,6 +1,9 @@
-# natasks
+# NATaskS
 
-`natasks` is a small Go task queue library built on top of NATS JetStream.
+![Logo](.github/logo.png)
+
+
+`NATaskS` is a small Go task queue library built on top of NATS JetStream.
 
 It focuses on two things:
 
