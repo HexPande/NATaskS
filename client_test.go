@@ -24,11 +24,12 @@ func TestClientDispatchTaskValidation(t *testing.T) {
 	require.EqualError(t, client.Dispatch(context.Background(), task, internalScheduleToken), `natasks: queue "__natasks_schedule" is reserved for internal scheduling`)
 }
 
-func TestClientDispatchNormalizesNilContext(t *testing.T) {
+func TestClientDispatchPassesContext(t *testing.T) {
 	task, err := NewTask("jobs.test", []byte(`{}`))
 	require.NoError(t, err)
 
 	var gotCtx context.Context
+	wantCtx := context.Background()
 	client := &Client{
 		dispatch: func(ctx context.Context, task *Task, queue string) error {
 			gotCtx = ctx
@@ -36,8 +37,8 @@ func TestClientDispatchNormalizesNilContext(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, client.Dispatch(nil, task, "jobs"))
-	require.NotNil(t, gotCtx)
+	require.NoError(t, client.Dispatch(wantCtx, task, "jobs"))
+	require.Equal(t, wantCtx, gotCtx)
 }
 
 func TestClientNewMessage(t *testing.T) {
@@ -71,7 +72,7 @@ func TestClientNewScheduledMessage(t *testing.T) {
 
 func TestDispatchScheduleAt(t *testing.T) {
 	at := time.Now().UTC().Add(time.Minute).Round(0)
-	got, ok := dispatchScheduleAt(withDispatchScheduleAt(nil, at))
+	got, ok := dispatchScheduleAt(withDispatchScheduleAt(context.Background(), at))
 	require.True(t, ok)
 	require.Equal(t, at, got)
 }

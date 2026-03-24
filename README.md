@@ -4,7 +4,7 @@
 
 [![Test](https://github.com/HexPande/NATaskS/actions/workflows/test.yml/badge.svg)](https://github.com/HexPande/NATaskS/actions/workflows/test.yml)
 [![Lint](https://github.com/HexPande/NATaskS/actions/workflows/lint.yml/badge.svg)](https://github.com/HexPande/NATaskS/actions/workflows/lint.yml)
-![Go Version](https://img.shields.io/badge/go%20version-%3E=1.23-61CFDD)
+![Go Version](https://img.shields.io/badge/go%20version-%3E=1.24-61CFDD)
 [![Go Reference](https://pkg.go.dev/badge/github.com/HexPande/NATaskS.svg)](https://pkg.go.dev/github.com/HexPande/NATaskS)
 [![Go Report Card](https://goreportcard.com/badge/github.com/HexPande/NATaskS)](https://goreportcard.com/report/github.com/HexPande/NATaskS)
 
@@ -38,7 +38,7 @@ go get github.com/hexpande/natasks
 
 ## Requirements
 
-- Go `1.23.0+`
+- Go `1.24.0+`
 - NATS with JetStream enabled
 
 ## Quick Start
