@@ -8,24 +8,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      nats:
-        image: nats:latest
-        ports:
-          - 4222:4222
-          - 8222:8222
-        options: >-
-          --health-cmd "wget -qO- http://127.0.0.1:8222/healthz || exit 1"
-          --health-interval 2s
-          --health-timeout 2s
-          --health-retries 30
-          -js
-          -m 8222 
-
-
-    env:
-      NATASKS_NATS_URL: nats://127.0.0.1:4222
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,6 +18,38 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Start NATS with JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:latest \
+            -js \
+            -m 8222
+
+      - name: Wait for NATS
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8222/healthz > /dev/null; then
+              echo "NATS is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "NATS did not become ready in time"
+          docker logs nats
+          exit 1
+
       - name: Run tests
+        env:
+          NATASKS_NATS_URL: nats://127.0.0.1:4222
         run: go test -v ./...
 
+      - name: Print NATS logs on failure
+        if: failure()
+        run: docker logs nats
+
+      - name: Stop NATS
+        if: always()
+        run: docker rm -f nats
