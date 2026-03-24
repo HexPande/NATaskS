@@ -1,6 +1,6 @@
 module github.com/hexpande/natasks
 
-go 1.25.6
+go 1.23.0
 
 require (
 	github.com/nats-io/nats.go v1.46.1
