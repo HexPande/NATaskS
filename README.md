@@ -4,7 +4,7 @@
 
 [![Test](https://github.com/HexPande/NATaskS/actions/workflows/test.yml/badge.svg)](https://github.com/HexPande/NATaskS/actions/workflows/test.yml)
 [![Lint](https://github.com/HexPande/NATaskS/actions/workflows/lint.yml/badge.svg)](https://github.com/HexPande/NATaskS/actions/workflows/lint.yml)
-![Go Version](https://img.shields.io/github/go-mod/go-version/HexPande/NATaskS)
+![Go Version](https://img.shields.io/badge/go%20version-%3E=1.23-61CFDD)
 [![Go Reference](https://pkg.go.dev/badge/github.com/HexPande/NATaskS.svg)](https://pkg.go.dev/github.com/HexPande/NATaskS)
 [![Go Report Card](https://goreportcard.com/badge/github.com/HexPande/NATaskS)](https://goreportcard.com/report/github.com/HexPande/NATaskS)
 
@@ -21,7 +21,7 @@ It focuses on two things:
 - task dispatch on top of NATS JetStream
 - immediate, delayed, and scheduled task delivery
 - publish deduplication via `Nats-Msg-Id`
-- worker-based task processing with configurable concurrency
+- worker-based task processing with configurable concurrencyr
 - automatic stream and consumer provisioning
 - retries with backoff and dead-letter queues
 - graceful worker shutdown
@@ -38,7 +38,7 @@ go get github.com/hexpande/natasks
 
 ## Requirements
 
-- Go `1.25.6+`
+- Go `1.23.0+`
 - NATS with JetStream enabled
 
 ## Quick Start
