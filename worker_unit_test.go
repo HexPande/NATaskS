@@ -180,23 +180,35 @@ func TestWorkerHandleMessageRetry(t *testing.T) {
 func TestWorkerHandleFetchResult(t *testing.T) {
 	w := &Worker{cfg: workerConfig{idleWait: 0}}
 
-	stop, err := w.handleFetchResult(context.Background(), nil)
+	nextConsumer, stop, err := w.handleFetchResult(context.Background(), nil)
+	require.Nil(t, nextConsumer)
 	require.False(t, stop)
 	require.NoError(t, err)
 
-	stop, err = w.handleFetchResult(context.Background(), nats.ErrTimeout)
+	nextConsumer, stop, err = w.handleFetchResult(context.Background(), nats.ErrTimeout)
+	require.Nil(t, nextConsumer)
 	require.False(t, stop)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	stop, err = w.handleFetchResult(ctx, context.Canceled)
+	nextConsumer, stop, err = w.handleFetchResult(ctx, context.Canceled)
+	require.Nil(t, nextConsumer)
 	require.True(t, stop)
 	require.NoError(t, err)
 
-	stop, err = w.handleFetchResult(context.Background(), errors.New("boom"))
+	nextConsumer, stop, err = w.handleFetchResult(context.Background(), errors.New("boom"))
+	require.Nil(t, nextConsumer)
 	require.True(t, stop)
 	require.Error(t, err)
+}
+
+func TestIsReadyNilSafe(t *testing.T) {
+	var client *Client
+	var worker *Worker
+
+	require.False(t, client.IsReady())
+	require.False(t, worker.IsReady())
 }
 
 func TestWorkerRetryHelpers(t *testing.T) {

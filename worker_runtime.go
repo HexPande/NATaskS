@@ -40,12 +40,30 @@ func (w *Worker) consumerForRun() (jetstream.Consumer, error) {
 		return w.consumer, nil
 	}
 
+	return w.refreshConsumerForRun()
+}
+
+func (w *Worker) refreshConsumerForRun() (jetstream.Consumer, error) {
 	consumer, err := w.js.Consumer(context.Background(), w.cfg.streamName, w.consumerName())
 	if err != nil {
 		ctx, cancel := managementContext()
 		defer cancel()
 		consumer, err = w.js.Consumer(ctx, w.cfg.streamName, w.consumerName())
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	w.consumer = consumer
+	return consumer, nil
+}
+
+func (w *Worker) recoverConsumerForRun() (jetstream.Consumer, error) {
+	if err := ensureStream(w.js, w.cfg.config); err != nil {
+		return nil, err
+	}
+
+	consumer, err := w.ensureConsumer()
 	if err != nil {
 		return nil, err
 	}
@@ -79,17 +97,36 @@ func (w *Worker) fetchSize() int {
 	return w.cfg.fetchBatch
 }
 
-func (w *Worker) handleFetchResult(ctx context.Context, err error) (stop bool, runErr error) {
+func (w *Worker) handleFetchResult(ctx context.Context, err error) (nextConsumer jetstream.Consumer, stop bool, runErr error) {
 	switch {
 	case err == nil:
-		return false, nil
+		return nil, false, nil
 	case w.isShutdownFetchError(ctx, err):
-		return true, nil
+		return nil, true, nil
 	case w.isIdleFetchError(ctx, err):
 		w.waitAfterIdleFetch()
-		return false, nil
+		return nil, false, nil
+	case w.isRecoverableFetchError(err):
+		w.log().Warn("natasks: fetch interrupted, waiting for nats reconnect", "error", err, "status", connectionStatus(w.jetStreamConn()).String())
+
+		if waitErr := w.waitForReconnect(ctx); waitErr != nil {
+			if errors.Is(waitErr, context.Canceled) || errors.Is(waitErr, context.DeadlineExceeded) {
+				return nil, true, nil
+			}
+			return nil, true, waitErr
+		}
+
+		consumer, recoverErr := w.recoverConsumerForRun()
+		if recoverErr != nil {
+			w.log().Warn("natasks: recover worker consumer after reconnect", "error", recoverErr)
+			w.waitAfterIdleFetch()
+			return nil, false, nil
+		}
+
+		w.log().Info("natasks: nats connection restored, resuming worker")
+		return consumer, false, nil
 	default:
-		return true, fmt.Errorf("natasks: fetch messages: %w", err)
+		return nil, true, fmt.Errorf("natasks: fetch messages: %w", err)
 	}
 }
 
@@ -115,6 +152,39 @@ func (w *Worker) isShutdownFetchError(ctx context.Context, err error) bool {
 	}
 
 	return ctx.Err() != nil
+}
+
+func (w *Worker) isRecoverableFetchError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	switch connectionStatus(w.jetStreamConn()) {
+	case nats.CONNECTING, nats.DISCONNECTED, nats.RECONNECTING:
+		return true
+	default:
+		return false
+	}
+}
+
+func (w *Worker) waitForReconnect(ctx context.Context) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		switch connectionStatus(w.jetStreamConn()) {
+		case nats.CONNECTED:
+			return nil
+		case nats.CLOSED:
+			if err := connectionLastError(w.jetStreamConn()); err != nil {
+				return fmt.Errorf("natasks: nats connection closed: %w", err)
+			}
+			return fmt.Errorf("natasks: nats connection closed")
+		}
+
+		w.waitAfterIdleFetch()
+	}
 }
 
 func (w *Worker) terminateMessage(msg jetstream.Msg, reason string, cause error) error {

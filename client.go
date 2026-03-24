@@ -3,6 +3,7 @@ package natasks
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ type Client struct {
 	js             jetstream.JetStream
 	cfg            config
 	dispatch       DispatchFunc
+	logger         *slog.Logger
 	scheduleMu     sync.Mutex
 	schedulesReady bool
 }
@@ -37,12 +39,31 @@ func NewClient(js jetstream.JetStream, opts ...Option) (*Client, error) {
 	}
 
 	client := &Client{
-		js:  js,
-		cfg: cfg,
+		js:     js,
+		cfg:    cfg,
+		logger: slog.Default(),
 	}
 	client.dispatch = chainDispatchMiddleware(client.dispatchNow, cfg.dispatchMiddleware)
 
 	return client, nil
+}
+
+// WithLogger replaces the client logger.
+func (c *Client) WithLogger(logger *slog.Logger) *Client {
+	if c == nil || logger == nil {
+		return c
+	}
+
+	c.logger = logger
+	return c
+}
+
+func (c *Client) log() *slog.Logger {
+	if c == nil || c.logger == nil {
+		return slog.Default()
+	}
+
+	return c.logger
 }
 
 // Dispatch publishes a task to the queue.
@@ -118,8 +139,22 @@ func (c *Client) dispatchNow(ctx context.Context, task *Task, queue string) erro
 	}
 
 	if _, err := c.js.PublishMsg(ctx, msg); err != nil {
+		c.log().Debug("natasks: task publish failed",
+			"queue", queue,
+			"task", task.Name(),
+			"message_id", task.MessageID(),
+			"subject", msg.Subject,
+			"error", err,
+		)
 		return fmt.Errorf("natasks: publish task: %w", err)
 	}
+
+	c.log().Debug("natasks: task published",
+		"queue", queue,
+		"task", task.Name(),
+		"message_id", task.MessageID(),
+		"subject", msg.Subject,
+	)
 
 	return nil
 }

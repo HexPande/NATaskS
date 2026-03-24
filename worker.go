@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -96,8 +97,18 @@ func (w *Worker) WithLogger(logger *slog.Logger) *Worker {
 	return w
 }
 
-// Run starts the fetch loop and blocks until ctx is canceled or an unrecoverable
-// consumer setup error occurs.
+func (w *Worker) log() *slog.Logger {
+	if w == nil || w.logger == nil {
+		return slog.Default()
+	}
+
+	return w.logger
+}
+
+// Run starts the fetch loop and blocks until ctx is canceled or the underlying
+// NATS connection is permanently closed. Temporary disconnects are treated as
+// recoverable: the worker waits for the connection to return, ensures the
+// stream and consumer exist again, and then resumes fetching.
 func (w *Worker) Run(ctx context.Context) error {
 	if w == nil {
 		return fmt.Errorf("natasks: nil worker")
@@ -113,8 +124,12 @@ func (w *Worker) Run(ctx context.Context) error {
 
 	consumer, err := w.consumerForRun()
 	if err != nil {
-		return fmt.Errorf("natasks: get worker consumer: %w", err)
+		runErr := fmt.Errorf("natasks: get worker consumer: %w", err)
+		w.log().Error("natasks: worker stopped due to nats", "queue", w.queue, "consumer", w.consumerName(), "error", runErr, "status", connectionStatus(w.jetStreamConn()).String())
+		return runErr
 	}
+
+	w.log().Info("natasks: worker started", "queue", w.queue, "consumer", w.consumerName())
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -123,7 +138,14 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		msgs, err := w.fetchBatch(ctx, consumer)
 		if err != nil || len(msgs) == 0 {
-			if stop, runErr := w.handleFetchResult(ctx, err); stop {
+			nextConsumer, stop, runErr := w.handleFetchResult(ctx, err)
+			if nextConsumer != nil {
+				consumer = nextConsumer
+			}
+			if stop {
+				if runErr != nil {
+					w.log().Error("natasks: worker stopped due to nats", "queue", w.queue, "consumer", w.consumerName(), "error", runErr, "status", connectionStatus(w.jetStreamConn()).String())
+				}
 				return runErr
 			}
 
@@ -144,14 +166,36 @@ func (w *Worker) handleMessage(ctx context.Context, msg jetstream.Msg) error {
 		return err
 	}
 
+	startedAt := time.Now()
+	w.log().Debug("natasks: task processing started",
+		"queue", w.queue,
+		"task", task.Name(),
+		"message_id", task.MessageID(),
+	)
+
 	stopProgress := w.startProgressLoop(msg)
 	defer stopProgress()
 
 	if err := w.runHandler(ctx, handler, task); err != nil {
+		w.log().Debug("natasks: task processing finished",
+			"queue", w.queue,
+			"task", task.Name(),
+			"message_id", task.MessageID(),
+			"duration", time.Since(startedAt),
+			"error", err,
+		)
 		return w.retryOrDeadLetter(msg, task, err)
 	}
 
-	return w.ackMessage(msg)
+	err = w.ackMessage(msg)
+	w.log().Debug("natasks: task processing finished",
+		"queue", w.queue,
+		"task", task.Name(),
+		"message_id", task.MessageID(),
+		"duration", time.Since(startedAt),
+		"error", err,
+	)
+	return err
 }
 
 func (w *Worker) processBatch(ctx context.Context, msgs []jetstream.Msg) {

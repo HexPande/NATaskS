@@ -57,7 +57,14 @@ type SendEmailPayload struct {
 }
 
 func main() {
-	nc, err := nats.Connect("nats://127.0.0.1:4222")
+	nc, err := nats.Connect(
+		"nats://127.0.0.1:4222",
+		nats.Name("natasks-example"),
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(-1),
+		nats.ReconnectWait(2*time.Second),
+		nats.ReconnectJitter(250*time.Millisecond, 2*time.Second),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -119,6 +126,17 @@ func main() {
 }
 ```
 
+## Recommended `nats.Connect`
+
+For production workers and dispatchers, prefer explicit reconnect settings and callbacks instead of bare `nats.Connect(url)`:
+
+- `RetryOnFailedConnect(true)` so process startup can wait for NATS instead of failing immediately.
+- `MaxReconnects(-1)` so a long-lived worker keeps trying until your process decides to exit.
+- `ReconnectWait(...)` and `ReconnectJitter(...)` to avoid reconnect storms.
+- `DisconnectErrHandler`, `ReconnectHandler`, `ClosedHandler`, and `ErrorHandler` for observability.
+
+`natasks` uses the connection you provide. It does not create or own `nats.Conn`, so reconnect policy should be defined at the `nats.Connect(...)` layer.
+
 ## Examples
 
 Runnable examples live in [`examples/`](./examples):
@@ -144,9 +162,21 @@ Main methods:
 - `client.Dispatch(ctx, task, queue)`
 - `client.DispatchIn(ctx, task, queue, delay)`
 - `client.DispatchAt(ctx, task, queue, at)`
+- `client.IsReady()`
 - `worker.Handle(name, handler)`
 - `worker.Run(ctx)`
+- `worker.IsReady()`
 - `task.WithMessageID(id)`
+
+## Connection Loss Behavior
+
+`worker.Run(ctx)` treats temporary NATS disconnects as recoverable runtime events.
+
+- While the underlying connection is reconnecting, the worker pauses fetches.
+- After reconnect, it ensures the stream and consumer still exist and then resumes processing.
+- `Run` returns only when `ctx` is canceled, the NATS connection is permanently closed, or a non-recoverable fetch error occurs.
+
+Use `worker.IsReady()` or `client.IsReady()` when you need a simple readiness check.
 
 ## Retry and DLQ
 

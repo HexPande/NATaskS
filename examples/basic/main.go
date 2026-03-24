@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/hexpande/natasks"
@@ -12,8 +14,8 @@ import (
 )
 
 type SendEmailPayload struct {
-	UserID int    `json:"user_id"`
-	Email  string `json:"email"`
+	User  int    `json:"user"`
+	Email string `json:"email"`
 }
 
 func main() {
@@ -50,7 +52,10 @@ func main() {
 			return natasks.NoRetry(err)
 		}
 
-		log.Printf("send email to %s for user %d", payload.Email, payload.UserID)
+		slog.Info("send mail",
+			"email", payload.Email,
+			"user", payload.User,
+		)
 		return nil
 	})
 
@@ -62,11 +67,10 @@ func main() {
 
 	time.Sleep(200 * time.Millisecond)
 
-	log.Print("dispatch messages")
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1000; i++ {
 		body, err := json.Marshal(SendEmailPayload{
-			UserID: 42,
-			Email:  "user@example.com",
+			User:  i,
+			Email: fmt.Sprintf("user%d@example.com", i),
 		})
 		if err != nil {
 			log.Fatal(err)
