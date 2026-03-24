@@ -1,19 +1,27 @@
-name: CI
+name: test
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      nats:
+        image: nats:latest
+        ports:
+          - 4222:4222
+          - 8222:8222
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:8222/healthz || exit 1"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+          -js
+          -m 8222 
+
 
     env:
       NATASKS_NATS_URL: nats://127.0.0.1:4222
@@ -28,12 +36,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Start NATS
-        run: docker compose up -d nats
-
       - name: Run tests
         run: go test -v ./...
 
-      - name: Stop NATS
-        if: always()
-        run: docker compose down -v
