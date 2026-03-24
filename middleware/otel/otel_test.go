@@ -60,6 +60,27 @@ func TestPropagationFromDispatchToProcess(t *testing.T) {
 	require.Equal(t, spans[1].SpanContext().TraceID(), spans[0].Parent().TraceID())
 }
 
+func TestMiddlewareImplementsNatasksPropagator(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	mw := New(Options{TracerProvider: provider, Propagator: propagation.TraceContext{}})
+
+	var propagator natasks.MessagePropagator = mw
+
+	header := nats.Header{}
+	ctx, span := provider.Tracer("test").Start(context.Background(), "root")
+
+	propagator.Inject(ctx, natsHeaderCarrier(header))
+	extracted := propagator.Extract(context.Background(), natsHeaderCarrier(header))
+	_, child := provider.Tracer("test").Start(extracted, "child")
+	child.End()
+	span.End()
+
+	spans := recorder.Ended()
+	require.Len(t, spans, 2)
+	require.Equal(t, spans[1].SpanContext().TraceID(), spans[0].Parent().TraceID())
+}
+
 type natsHeaderCarrier nats.Header
 
 func (c natsHeaderCarrier) Get(key string) string { return nats.Header(c).Get(key) }

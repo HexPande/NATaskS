@@ -24,6 +24,8 @@ type Middleware struct {
 	propagator propagation.TextMapPropagator
 }
 
+var _ natasks.MessagePropagator = (*Middleware)(nil)
+
 func New(opts Options) *Middleware {
 	provider := opts.TracerProvider
 	if provider == nil {

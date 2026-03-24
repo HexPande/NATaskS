@@ -2,14 +2,18 @@ package natasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 func (w *Worker) retryOrDeadLetter(msg jetstream.Msg, task *Task, handlerErr error) error {
+	if errors.Is(handlerErr, ErrNoRetry) {
+		return w.ackNoRetryMessage(msg, handlerErr)
+	}
+
 	deliveries, err := deliveryAttempts(msg)
 	if err != nil {
 		return err
@@ -39,6 +43,10 @@ func (w *Worker) retryOrDeadLetter(msg jetstream.Msg, task *Task, handlerErr err
 	return handlerErr
 }
 
+func (w *Worker) ackNoRetryMessage(msg jetstream.Msg, handlerErr error) error {
+	return ackWithResult(msg, "no-retry", unwrapNoRetry(handlerErr))
+}
+
 func (w *Worker) exhaustedRetries(deliveries uint64) bool {
 	if w.cfg.maxRetries < 0 {
 		return false
@@ -66,23 +74,21 @@ func (w *Worker) redeliveryDelay(deliveries uint64) time.Duration {
 }
 
 func (w *Worker) ackDeadLetteredMessage(msg jetstream.Msg, handlerErr error) error {
+	return ackWithResult(msg, "dead-lettered", handlerErr)
+}
+
+func ackWithResult(msg jetstream.Msg, label string, result error) error {
 	if err := msg.Ack(); err != nil {
-		return fmt.Errorf("natasks: ack dead-lettered message: %w", err)
+		return fmt.Errorf("natasks: ack %s message: %w", label, err)
 	}
 
-	return handlerErr
+	return result
 }
 
 func (w *Worker) publishDLQ(msg jetstream.Msg, task *Task, deliveries uint64, handlerErr error) error {
 	dlq := dlqQueue(w.queue, w.cfg.dlqSuffix)
-	dlqMsg := nats.NewMsg(queueSubject(w.cfg.subjectPrefix, dlq))
-	dlqMsg.Data = task.Payload()
-
-	for key, values := range msg.Headers() {
-		for _, value := range values {
-			dlqMsg.Header.Add(key, value)
-		}
-	}
+	dlqMsg := buildTaskMessage(queueSubject(w.cfg.subjectPrefix, dlq), dlq, task)
+	copyTaskHeaders(dlqMsg.Header, msg.Headers())
 
 	dlqMsg.Header.Set(headerQueueName, dlq)
 	dlqMsg.Header.Set(headerOriginalQueue, w.queue)

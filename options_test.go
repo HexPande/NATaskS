@@ -41,6 +41,7 @@ func TestCollectWorkerConfigAppliesOptions(t *testing.T) {
 		WithSubjectPrefix("app.tasks"),
 		WithConsumerPrefix("worker"),
 		WithDurable("jobs"),
+		WithConcurrency(4),
 		WithFetchBatch(10),
 		WithFetchTimeout(2 * time.Second),
 		WithTaskTimeout(3 * time.Second),
@@ -58,6 +59,7 @@ func TestCollectWorkerConfigAppliesOptions(t *testing.T) {
 	require.Equal(t, "app.tasks", cfg.subjectPrefix)
 	require.Equal(t, "worker", cfg.consumerPrefix)
 	require.Equal(t, "jobs", cfg.durable)
+	require.Equal(t, 4, cfg.concurrency)
 	require.Equal(t, 10, cfg.fetchBatch)
 	require.Equal(t, 2*time.Second, cfg.fetchTimeout)
 	require.Equal(t, 3*time.Second, cfg.taskTimeout)
@@ -75,6 +77,7 @@ func TestWorkerConfigValidate(t *testing.T) {
 		name string
 		mut  func(*workerConfig)
 	}{
+		{name: "concurrency", mut: func(cfg *workerConfig) { cfg.concurrency = 0 }},
 		{name: "fetch batch", mut: func(cfg *workerConfig) { cfg.fetchBatch = 0 }},
 		{name: "fetch timeout", mut: func(cfg *workerConfig) { cfg.fetchTimeout = 0 }},
 		{name: "task timeout", mut: func(cfg *workerConfig) { cfg.taskTimeout = -time.Second }},

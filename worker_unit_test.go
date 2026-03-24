@@ -3,6 +3,7 @@ package natasks
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -179,23 +180,35 @@ func TestWorkerHandleMessageRetry(t *testing.T) {
 func TestWorkerHandleFetchResult(t *testing.T) {
 	w := &Worker{cfg: workerConfig{idleWait: 0}}
 
-	stop, err := w.handleFetchResult(context.Background(), nil)
+	nextConsumer, stop, err := w.handleFetchResult(context.Background(), nil)
+	require.Nil(t, nextConsumer)
 	require.False(t, stop)
 	require.NoError(t, err)
 
-	stop, err = w.handleFetchResult(context.Background(), nats.ErrTimeout)
+	nextConsumer, stop, err = w.handleFetchResult(context.Background(), nats.ErrTimeout)
+	require.Nil(t, nextConsumer)
 	require.False(t, stop)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	stop, err = w.handleFetchResult(ctx, context.Canceled)
+	nextConsumer, stop, err = w.handleFetchResult(ctx, context.Canceled)
+	require.Nil(t, nextConsumer)
 	require.True(t, stop)
 	require.NoError(t, err)
 
-	stop, err = w.handleFetchResult(context.Background(), errors.New("boom"))
+	nextConsumer, stop, err = w.handleFetchResult(context.Background(), errors.New("boom"))
+	require.Nil(t, nextConsumer)
 	require.True(t, stop)
 	require.Error(t, err)
+}
+
+func TestIsReadyNilSafe(t *testing.T) {
+	var client *Client
+	var worker *Worker
+
+	require.False(t, client.IsReady())
+	require.False(t, worker.IsReady())
 }
 
 func TestWorkerRetryHelpers(t *testing.T) {
@@ -212,4 +225,119 @@ func TestWorkerAckDeadLetteredMessage(t *testing.T) {
 	handlerErr := errors.New("handler failed")
 	require.Equal(t, handlerErr, w.ackDeadLetteredMessage(msg, handlerErr))
 	require.True(t, msg.acked)
+}
+
+func TestNoRetryWrapsError(t *testing.T) {
+	err := NoRetry(errors.New("do not retry"))
+	require.ErrorIs(t, err, ErrNoRetry)
+	require.EqualError(t, err, "do not retry")
+	require.EqualError(t, unwrapNoRetry(err), "do not retry")
+	require.NoError(t, NoRetry(nil))
+}
+
+func TestWorkerHandleMessageNoRetry(t *testing.T) {
+	w := &Worker{
+		cfg: workerConfig{
+			progressInterval: time.Hour,
+		},
+		handlers: map[string]Handler{
+			"jobs.test": func(ctx context.Context, task *Task) error {
+				return NoRetry(errors.New("stop here"))
+			},
+		},
+	}
+
+	msg := &testMsg{
+		headers: nats.Header{
+			headerTaskName: []string{"jobs.test"},
+		},
+		data: []byte(`{}`),
+	}
+
+	err := w.handleMessage(context.Background(), msg)
+	require.EqualError(t, err, "stop here")
+	require.True(t, msg.acked)
+	require.False(t, msg.nacked)
+	require.False(t, msg.termed)
+}
+
+func TestWorkerFetchSize(t *testing.T) {
+	w := &Worker{cfg: workerConfig{fetchBatch: 1, concurrency: 4}}
+	require.Equal(t, 4, w.fetchSize())
+
+	w.cfg.fetchBatch = 10
+	require.Equal(t, 10, w.fetchSize())
+}
+
+func TestWorkerProcessBatchConcurrency(t *testing.T) {
+	const total = 4
+
+	started := make(chan struct{}, total)
+	release := make(chan struct{})
+	var active int32
+	var maxActive int32
+
+	w := &Worker{
+		cfg: workerConfig{
+			concurrency:      2,
+			progressInterval: time.Hour,
+		},
+		handlers: map[string]Handler{
+			"jobs.test": func(ctx context.Context, task *Task) error {
+				current := atomic.AddInt32(&active, 1)
+				defer atomic.AddInt32(&active, -1)
+
+				for {
+					observed := atomic.LoadInt32(&maxActive)
+					if current <= observed || atomic.CompareAndSwapInt32(&maxActive, observed, current) {
+						break
+					}
+				}
+
+				started <- struct{}{}
+				<-release
+				return nil
+			},
+		},
+	}
+
+	msgs := make([]jetstream.Msg, 0, total)
+	for range total {
+		msgs = append(msgs, &testMsg{
+			headers: nats.Header{
+				headerTaskName: []string{"jobs.test"},
+			},
+			data: []byte(`{}`),
+		})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		w.processBatch(context.Background(), msgs)
+		close(done)
+	}()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for concurrent handlers to start")
+		}
+	}
+
+	select {
+	case <-started:
+		t.Fatal("worker exceeded configured concurrency")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for batch processing")
+	}
+
+	require.EqualValues(t, 2, atomic.LoadInt32(&maxActive))
 }

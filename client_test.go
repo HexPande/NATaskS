@@ -44,6 +44,7 @@ func TestClientNewMessage(t *testing.T) {
 	task, err := NewTask("jobs.test", []byte(`{}`))
 	require.NoError(t, err)
 	task.WithMessageID("job-42")
+	task.SetHeader("X-Trace-ID", "trace-42")
 
 	client := &Client{cfg: config{subjectPrefix: "app.tasks"}}
 	msg := client.newMessage(context.Background(), "emails", task)
@@ -52,6 +53,7 @@ func TestClientNewMessage(t *testing.T) {
 	require.Equal(t, "jobs.test", msg.Header.Get(headerTaskName))
 	require.Equal(t, "emails", msg.Header.Get(headerQueueName))
 	require.Equal(t, "job-42", msg.Header.Get(jetstream.MsgIDHeader))
+	require.Equal(t, "trace-42", msg.Header.Get("X-Trace-ID"))
 }
 
 func TestClientNewScheduledMessage(t *testing.T) {

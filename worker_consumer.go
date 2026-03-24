@@ -8,6 +8,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+var sanitizeTokenReplacer = strings.NewReplacer(".", "-", " ", "-", ">", "-", "*", "-")
+
 func (w *Worker) handler(name string) (Handler, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -54,10 +56,9 @@ func (w *Worker) consumerName() string {
 		return w.cfg.durable
 	}
 
-	return fmt.Sprintf("%s-%s", w.cfg.consumerPrefix, sanitizeToken(w.queue))
+	return w.cfg.consumerPrefix + "-" + sanitizeToken(w.queue)
 }
 
 func sanitizeToken(in string) string {
-	replacer := strings.NewReplacer(".", "-", " ", "-", ">", "-", "*", "-")
-	return replacer.Replace(strings.TrimSpace(in))
+	return sanitizeTokenReplacer.Replace(strings.TrimSpace(in))
 }
